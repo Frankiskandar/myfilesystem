@@ -6,14 +6,24 @@
 //constants
 #define SECTORS 9765
 #define DATASIZE 9688
-
 #define FATSIZE 76
 #define RESERVED 77
-
 #define BLOCKSIZE 512
-
 #define ROOT 78
 #define FAT 2
+
+typedef struct {
+	char* fsname; // filesys's name it uses 8 bytes, offset 0-7
+	unsigned short byte_per_sector; // 512 , uses 2 bytes, offset 8-9
+	unsigned char sector_per_cluster; // 4 , uses 1 bytes offset 10
+	unsigned short reserved_sector; // 1 , uses 2 bytes, offset 11-12
+	unsigned char number_of_fat; // 1 , uses 1 byte, offset 13
+	unsigned short sector_per_fat; // 8 uses 2 bytes, offset 14-15
+	unsigned short RD_entries; // 512 , uses 2 bytes, offset 16-17
+	unsigned short total_sector; // 3906 uses 2 bytes, offset 18-19
+//	char unused[492]; //512-20
+	
+} Metadata;
 
 //each FAT entry is 2 bytes, holds next cluster in file or special character 
 typedef struct FATentry{
@@ -40,7 +50,7 @@ typedef struct dirEntry{
 
 //function declarations
 void clearInput();
-void clearDrive();
+void my_format();
 int firstByte(int cluster);
 short *getTimeDate();
 int firstAvailable();
@@ -73,15 +83,15 @@ struct tm *timeinfo;
 
 //my main function is to test the functions, I will make a demo for my demo
 int main(){
-	currentDir = ROOT-RESERVED;
-	currentCluster = currentDir;
-	currentSpace = DATASIZE;
+	currentDir = ROOT-RESERVED; //1
+	currentCluster = currentDir; //1
+	currentSpace = DATASIZE; //9688
 
 	dirEntry *file;
-	char *p = malloc(5*BLOCKSIZE);
+	char *p = malloc(5*BLOCKSIZE); //5*512
 	
 	drive = fopen("drive", "rw+");
-	char cmd;
+	char cmd; // to get user input
 	
 	short *timedate = getTimeDate();
 
@@ -91,12 +101,12 @@ int main(){
 	//create FAT, bootblock, and root directory table
 	while(b){
 		char *input = malloc(512);
-		printf("List of command:\n f to format the drive\n q to quit the program \n d to create a directory(separated by /)\n c to create a file\n o to open a file\n w to write to a file\n x to delete a file\n z to close a file\n r to read a file\n");
+		printf("List of command:\n f to format the drive\n q to quit the program \n d to create a directory(must be created one by one)\n c to create a file\n o to open a file\n w to write to a file\n x to delete a file\n z to close a file\n r to read a file\n");
 		printf("Your input: ");
 		cmd = getchar();
 		if(cmd=='f'){
-			//fill drive with NULL
-			clearDrive();
+			//set every byte as 00 to our disk
+			my_format();
 			//create FAT, bootblock, and root directory table
 			formatDrive();
 			printf("Format success!\n");
@@ -129,7 +139,7 @@ int main(){
 		//	scanf("%s", copy);
 	//		p = strcpy(p,copy);
 			//	p = strcpy(p, "this is what i wrote\n");
-			printf("printing the string that you just wrote: %s",p);
+			printf("printing the string that you just wrote: %s\n",p);
 			int s = writeFile(file, p);
 			printf("write succesful: %d\n", s);
 		}
@@ -183,24 +193,25 @@ int firstAvailable(){
 	printf("No more filesystem space\n");
 	return;
 }
-
-void clearDrive(){
-	//write null to entire drive file
-	int i = 0;
-	char *nul = malloc(512);
-	char *p = nul;
+//this function fills the entire disk with 00 00 00 ...
+void my_format(){
+	int i;
+	char *zeros = malloc(512);
+	char *p = zeros;
 	for(i=0; i<512; i++, p++)
-		*p = 0x00;
+		{
+			*p = 0x00; //512 x 00
+		}	
 	fseek(drive, 0, SEEK_SET);
-	for(i=0; i<SECTORS; i++)
-		fwrite(nul, 512,1,drive);
+	for(i=0; i<SECTORS; i++) // total sectors = 9765 and fill each sector with 512 zeros b/c each sector has 512 byte
+		fwrite(zeros, 512,1,drive);
 	fseek(drive,0, SEEK_SET);
 }
 
-int firstByte(int cluster){
-	//find the first byte of a cluster
-	cluster = (cluster-1)*512;
-	return (cluster);
+//this function finds the 1st byte of a cluster/sector
+int firstByte(int sector){
+	sector = (sector-1)*512;
+	return (sector);
 }
 
 short *getTimeDate(){
@@ -227,14 +238,14 @@ short *getTimeDate(){
 
 void formatDrive(){
 	fseek(drive, 0, SEEK_SET);
-	currentDir = ROOT-RESERVED;
-        currentCluster = currentDir;
-        currentSpace = DATASIZE;
-
+	currentDir = ROOT-RESERVED; //78-77=1
+        currentCluster = currentDir; // 1
+        currentSpace = DATASIZE; // DATASIZE == 9688
+/*
 	//create bootblock in cluster 0
 	void *bootblock = malloc(512); 
         char *boot = (char*)bootblock;
-        boot = strcat(boot,"My FAT32Lin");
+        boot = strcat(boot,"Fnu's FAT Filesystem");
         boot+=11;
         //byte 11-12: num bytes per sector(512)
         *boot = 0x02;
@@ -267,15 +278,62 @@ void formatDrive(){
 	fseek(drive, 0, SEEK_SET);
         fwrite(bootblock, 1, 512,drive);
 	free(bootblock);
+*/
+
+	Metadata mbr;
+	mbr.fsname = "my fs"; //offset 0-7
+	mbr.byte_per_sector = 512; // offset 8-9
+	mbr.sector_per_cluster = 1; // offset 10
+	mbr.reserved_sector = 1; // offset 11-12
+	mbr.number_of_fat = 2; // offset 13
+	mbr.sector_per_fat = 38; // offset 14-15
+	mbr.RD_entries = 512; // offset 16-17
+	mbr.total_sector = 9765; // offset 18-19
+	unsigned char unused = 0;
+	
+	fseek(drive, 0, SEEK_SET);
+	fwrite(mbr.fsname , sizeof(char) , 8, drive );
+	fseek(drive, 8, SEEK_SET);
+	fwrite(&mbr.byte_per_sector , sizeof(unsigned short) , 1, drive );
+	fseek(drive, 10, SEEK_SET);
+	fwrite(&mbr.sector_per_cluster , sizeof(unsigned char) , 1, drive );
+	fseek(drive, 11, SEEK_SET);
+	fwrite(&mbr.reserved_sector , sizeof(unsigned short) , 1, drive );
+	fseek(drive, 13, SEEK_SET);
+	fwrite(&mbr.number_of_fat , sizeof(unsigned char) , 1, drive );
+	fseek(drive, 14, SEEK_SET);
+	fwrite(&mbr.sector_per_fat , sizeof(unsigned short) , 1, drive );
+	fseek(drive, 16, SEEK_SET);
+	fwrite(&mbr.RD_entries , sizeof(unsigned short) , 1, drive );
+	fseek(drive, 18, SEEK_SET);
+	fwrite(&mbr.total_sector , sizeof(unsigned short) , 1, drive );
+	
+	// print 00 to the rest of metadata sector
+	int n = 20;
+	while (n!=512)
+	{
+	fseek(drive, n, SEEK_SET);
+	fwrite(&unused , sizeof(unsigned char) , 1, drive );
+	n++;
+	}
+	//print 55 AA at the end of first sector 
+	unsigned char end1 = 85;
+	unsigned char end2 = 170;
+	fseek(drive, 510, SEEK_SET);
+	fwrite(&end1,sizeof(unsigned char),1,drive);
+	fseek(drive, 511, SEEK_SET);
+	fwrite(&end2,sizeof(unsigned char),1,drive);
 
 	//create FATs
-	void *doubleFAT = malloc(512*FATSIZE);
-        fseek(drive, (BLOCKSIZE*FATSIZE) , SEEK_CUR);
+	void *doubleFAT = malloc(512*FATSIZE); //512 * 76
+        fseek(drive, (BLOCKSIZE*FATSIZE) , SEEK_CUR); //reserve 512*76byte for FAT table
         free(doubleFAT);
 	
 	//create root directory table
 	createDirTable();
 	createFATentry(1, 0xFFFF);  
+	
+
 }
 
 //leaves space for directory table 
@@ -284,18 +342,18 @@ void createDirTable(){
 	currentDir = currentCluster;
 
 	//root starts with one block and is dynamically allocated more as needed
-	if(currentDir == ROOT)
+	if(currentDir == ROOT) //78
 		createFATentry(currentDir, 0xFFFF);
 	fseek(drive, BLOCKSIZE, SEEK_CUR);
-	currentCluster+=1;
-	currentSpace -=1;
+	currentCluster+=1; //increment the cluster
+	currentSpace -=1; // decrement the datasize
 }
 //creates fat entry and returns pointer to previous position
 void createFATentry(int cluster, short next){
 	FATentry *new = malloc(sizeof(FATentry));
 	new->next = next;
 	//seek to FAT entry for cluster and write next
-	fseek(drive, firstByte(FAT)+(2*cluster), SEEK_SET);
+	fseek(drive, firstByte(FAT)+(2*cluster), SEEK_SET); // prints FF FF at first cluster of fat table. 
 	fwrite(new, 2, 1, drive);
 	//seek to second FAT and write in entry again
 	fseek(drive, 38*BLOCKSIZE-2, SEEK_CUR);

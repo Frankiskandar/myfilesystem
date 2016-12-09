@@ -32,7 +32,7 @@ typedef struct FATentry{
 
 //struct for directory entry
 //each directory entry is 32 bytes in size
-typedef struct dirEntry{
+typedef struct directoryEntry{
 	char name[11]; // 8 for name, 3 for extension offset 0-10
 	//offset 11 is for file attribute
 	unsigned int rdonly : 1; 
@@ -48,7 +48,7 @@ typedef struct dirEntry{
 	short date; // modified date //24-25
 	short stCluster; //26-27
 	long fileSize; //28-31
-}dirEntry;  
+}directoryEntry;  
 
 //function declarations
 void clearInput();
@@ -60,13 +60,13 @@ void disk_Init();
 void createDirTable();
 void createFATentry(int sector_num, short next);
 int getNextCluster(int sector_num);
-dirEntry *createDirEntry(char *namep, char attributes, short time, short date, short stCluster, long fileSize);
-dirEntry *createDirectory(char *path);
-dirEntry *createFile(char *path);
-dirEntry *openFile(char *path);
-int closeFile(dirEntry *file);
-int writeFile(dirEntry *file, char *write);
-char *readFile(dirEntry *file);
+directoryEntry *createDirEntry(char *namep, char attributes, short time, short date, short stCluster, long fileSize);
+directoryEntry *createDirectory(char *path);
+directoryEntry *createFile(char *path);
+directoryEntry *openFile(char *path);
+int closeFile(directoryEntry *file);
+int writeFile(directoryEntry *file, char *write);
+char *readFile(directoryEntry *file);
 int deleteFile(char *path);
 
 //these global var will be our pointers
@@ -86,7 +86,7 @@ int main(){
 	curDirectory = RD_START_SECTOR-NUM_RESERVED_SECTORS; //1
 	curCluster = curDirectory; //1
 	curSpace = NUM_DATAREGION_SECTORS; //9704 total available sector at start
-	dirEntry *file; //this holds openfile() return value
+	directoryEntry *file; //this holds openfile() return value
 	char *p = malloc(5*BLOCK_SIZE); //5*512	string that we re going to write to a file
 	disk = fopen("drive", "rw+"); //our disk
 	char cmd; // will be used to get user input	
@@ -362,6 +362,7 @@ void createFATentry(int sector_num, short next){
 	new->next = next;
 	//write the 2nd parameter of this funcion
 	fseek(disk, firstByte(FAT)+(2*sector_num), SEEK_SET); // prints next at the offset given by parameter in fat table
+	fwrite(new, 2, 1, disk);
 	//got to 2nd FAT and write the same entry 
 	fseek(disk, 30*BLOCK_SIZE-2, SEEK_CUR); // since each fat has 30 sectors
 	fwrite(new, 2, 1, disk);
@@ -383,14 +384,14 @@ int getNextCluster(int sector_num){
 	return entry->next;
 }
 
-dirEntry *createDirectory(char *path){
+directoryEntry *createDirectory(char *path){
 	int i, j, c;
 	//create array of entries to read
-	dirEntry *entry = malloc(16*sizeof(dirEntry));
-	dirEntry *h = entry;
+	directoryEntry *entry = malloc(16*sizeof(directoryEntry));
+	directoryEntry *h = entry;
 
 	//create return file descriptor
-	dirEntry *dir;
+	directoryEntry *dir;
 	
 	//array of each directory and the file 
 	char *names[16];
@@ -466,10 +467,10 @@ dirEntry *createDirectory(char *path){
 	return dir;
 }
 
-dirEntry *createDirEntry(char *namep, char attributes, short time, short date, short stCluster, long filesize){
+directoryEntry *createDirEntry(char *namep, char attributes, short time, short date, short stCluster, long filesize){
 	int i;
-	dirEntry *entry = malloc(sizeof(dirEntry));
-	dirEntry *check = malloc(sizeof(dirEntry));
+	directoryEntry *entry = malloc(sizeof(directoryEntry));
+	directoryEntry *check = malloc(sizeof(directoryEntry));
 	int numEntries;
 	//get name and update entry
 	for(i = 0; i <11; i++, namep++){
@@ -558,11 +559,11 @@ dirEntry *createDirEntry(char *namep, char attributes, short time, short date, s
 	return entry;
 }
 
-dirEntry *createFile(char *path){
+directoryEntry *createFile(char *path){
 	int i, j, c;
-	dirEntry *entry = malloc(sizeof(dirEntry));
-	dirEntry *h = entry;
-	dirEntry *fil;
+	directoryEntry *entry = malloc(sizeof(directoryEntry));
+	directoryEntry *h = entry;
+	directoryEntry *fil;
 	char *names[16];
 	char entryName[12];
 	char *p = path;
@@ -652,11 +653,11 @@ dirEntry *createFile(char *path){
 	return fil;
 }
 
-dirEntry *openFile(char *path){
+directoryEntry *openFile(char *path){
 	int i, j, c;
 	//allocate entry to read and entry to return
-	dirEntry *entry = malloc(sizeof(dirEntry));
-	dirEntry *file = malloc(sizeof(dirEntry));
+	directoryEntry *entry = malloc(sizeof(directoryEntry));
+	directoryEntry *file = malloc(sizeof(directoryEntry));
 	
 	//char arrays and pointers for path parsing
 	char *name[16];
@@ -735,7 +736,7 @@ dirEntry *openFile(char *path){
 	return file;
 }
 
-int closeFile(dirEntry *file){
+int closeFile(directoryEntry *file){
 	//free file to "close"
 	free(file);
 
@@ -746,7 +747,7 @@ int closeFile(dirEntry *file){
 	return 0;
 }
 
-int writeFile(dirEntry *file, char *write){
+int writeFile(directoryEntry *file, char *write){
 	int i = 0, d = 0;
 	char cluster[512];
 	char *c = malloc(1);
@@ -793,7 +794,7 @@ int writeFile(dirEntry *file, char *write){
 		return -1;
 }
 
-char *readFile(dirEntry *file){
+char *readFile(directoryEntry *file){
         int i = 1;
 	int d = 0;
         char *c = malloc(10*512);
@@ -824,12 +825,12 @@ char *readFile(dirEntry *file){
 
 int deleteFile(char *path){
 	//open file to parse path
-	dirEntry *file = openFile(path);
+	directoryEntry *file = openFile(path);
 	//if path does not exist
 	if(file->stCluster == 0) //by checking the start cluster #
 		return -1;
 	//allocate entry  and nul cluster
-	dirEntry *entry = malloc(sizeof(dirEntry));
+	directoryEntry *entry = malloc(sizeof(directoryEntry));
 	char *nul = malloc(512*sizeof(char));
 	curCluster = file->stCluster;
 

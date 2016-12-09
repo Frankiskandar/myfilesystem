@@ -2,6 +2,10 @@
 #include <string.h>
 #include <stdlib.h>
 
+#define SECTORS 3907
+
+FILE * infile;
+
 // metadata region
 typedef struct {
 	char* fsname; // filesys's name it uses 8 bytes, offset 0-7
@@ -15,6 +19,21 @@ typedef struct {
 //	char unused[492]; //512-20
 	
 } Metadata;
+
+//function to format the drive
+void my_format(){
+	int i;
+	char *zeros = malloc(512);
+	char *p = zeros;
+	for(i=0; i<512; i++, p++)
+		{
+			*p = 0x00; //512 x 00
+		}	
+	fseek(infile, 0, SEEK_SET);
+	for(i=0; i<SECTORS; i++) // total sectors = 3907 and fill each sector with 512 zeros b/c each sector has 512 byte
+		fwrite(zeros, 512,1,infile);
+	fseek(infile,0, SEEK_SET);
+}
 
 void metadata_init(FILE * infile)
 {
@@ -55,10 +74,10 @@ void metadata_init(FILE * infile)
 	n++;
 	}
 	
-	//test
-	char* test = "test1234";
+	//test adding something in FAT table
+	char* test = "FAT table 1";
 	fseek(infile, 512, SEEK_SET);
-	fwrite(test , sizeof(char) , 8, infile );
+	fwrite(test , sizeof(char) , 15, infile );
 	
 	printf("MBR information:\n");
 	printf("Name: %s\n",mbr.fsname);
@@ -73,8 +92,10 @@ void metadata_init(FILE * infile)
 
 int main() 
 {
-
-    FILE * infile = fopen("Drive2MB", "r+");
+	
+    infile = fopen("Drive2MB", "r+");
+    
+    my_format();
     metadata_init(infile);
 //	char* name = "Frank's File System";
 //	fseek(infile, 0, SEEK_SET);

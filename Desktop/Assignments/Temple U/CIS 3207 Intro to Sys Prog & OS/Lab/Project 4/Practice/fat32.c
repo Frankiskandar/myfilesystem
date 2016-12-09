@@ -6,10 +6,10 @@
 //constants
 #define SECTORS 9765
 #define DATASIZE 9688
-#define FATSIZE 76
-#define RESERVED 77
+#define FATSIZE 60
+#define RESERVED 61
 #define BLOCKSIZE 512
-#define ROOT 78
+#define ROOT 62
 #define FAT 2
 
 typedef struct {
@@ -17,7 +17,7 @@ typedef struct {
 	unsigned short byte_per_sector; // 512 , uses 2 bytes, offset 8-9
 	unsigned char sector_per_cluster; // 4 , uses 1 bytes offset 10
 	unsigned short reserved_sector; // 1 , uses 2 bytes, offset 11-12
-	unsigned char number_of_fat; // 1 , uses 1 byte, offset 13
+	unsigned char number_of_fat; // 2 , uses 1 byte, offset 13
 	unsigned short sector_per_fat; // 8 uses 2 bytes, offset 14-15
 	unsigned short RD_entries; // 512 , uses 2 bytes, offset 16-17
 	unsigned short total_sector; // 3906 uses 2 bytes, offset 18-19
@@ -177,20 +177,20 @@ int firstAvailable(){
 	int i = 1;
 	
 	//go to FAT and read first entry into f
-	fseek(drive, firstByte(FAT)+2, SEEK_SET);
-	FATentry *f = malloc(sizeof(FATentry));
+	fseek(drive, firstByte(FAT)+2, SEEK_SET); //3rd offset in fat is the first entry
+	FATentry *f = malloc(sizeof(FATentry)); //size of fat entry is 2 bytes
 	fread(f, 2, 1, drive);
 	//read first FAT entry
 	for(;i<=9688;i++){
-		if(f->next == 0){
+		if(f->next == 0){ //if we find the first available cluster
 			//seek to first available cluster and return cluster
-			fseek(drive, firstByte(i+RESERVED), SEEK_SET);
+			fseek(drive, firstByte(i+RESERVED), SEEK_SET); //i.e we find empty clus in sec 15, go to sector 61+15 in data region
 			return i;
 		}
 		else
 			fread(f, 2, 1, drive);
 	}
-	printf("No more filesystem space\n");
+	printf("No more space available");
 	return;
 }
 //this function fills the entire disk with 00 00 00 ...
@@ -208,7 +208,7 @@ void my_format(){
 	fseek(drive,0, SEEK_SET);
 }
 
-//this function finds the 1st byte of a cluster/sector
+//this function finds the 1st byte of a sector
 int firstByte(int sector){
 	sector = (sector-1)*512;
 	return (sector);
@@ -337,13 +337,14 @@ void formatDrive(){
 }
 
 //leaves space for directory table 
+//also creates an FFFF entry in FAT
 void createDirTable(){
 	//update currentDirectory cluster pointer 
 	currentDir = currentCluster;
 
 	//root starts with one block and is dynamically allocated more as needed
-	if(currentDir == ROOT) //78
-		createFATentry(currentDir, 0xFFFF);
+	if(currentDir == ROOT) //78  /62
+		createFATentry(currentDir, 0xFFFF); // a folder only has 1 sector/cluster
 	fseek(drive, BLOCKSIZE, SEEK_CUR);
 	currentCluster+=1; //increment the cluster
 	currentSpace -=1; // decrement the datasize
@@ -356,12 +357,13 @@ void createFATentry(int cluster, short next){
 	fseek(drive, firstByte(FAT)+(2*cluster), SEEK_SET); // prints FF FF at first cluster of fat table. 
 	fwrite(new, 2, 1, drive);
 	//seek to second FAT and write in entry again
-	fseek(drive, 38*BLOCKSIZE-2, SEEK_CUR);
+	fseek(drive, 30*BLOCKSIZE-2, SEEK_CUR);
 	fwrite(new, 2, 1, drive);
 	//seek back to previous location
 	fseek(drive, firstByte(cluster)+currentOffset, SEEK_SET);
 	free(new);
 }
+
 
 int getNextCluster(int cluster){
 	//allocate buffer for FAT entry
@@ -821,7 +823,7 @@ int deleteFile(char *path){
 	//open file to parse path
 	dirEntry *file = openFile(path);
 	//if path does not exist
-	if(file->stCluster == 0)
+	if(file->stCluster == 0) //by checking the start cluster #
 		return -1;
 	//allocate entry  and nul cluster
 	dirEntry *entry = malloc(sizeof(dirEntry));
@@ -834,15 +836,17 @@ int deleteFile(char *path){
 	fread(entry, 32, 1, drive);
 	currentOffset = 32;
 	//find the file
-	while(entry->stCluster!=file->stCluster){
+	while(entry->stCluster!=file->stCluster){ //compare the start cluster
 		fread(entry, 32, 1, drive);
 	}
 	//seek back on entry
-	fseek(drive, -32, SEEK_CUR);
-	fwrite(nul, 32,1, drive);
+	fseek(drive, -32, SEEK_CUR); // seek to the start
+	fwrite(nul, 32,1, drive); // write 00 32 times from the start
 
 	//seek to start cluster and write null to it
-	fseek(drive, firstByte(entry->stCluster+RESERVED), SEEK_SET);
+	//write 00 in the data region
+	//reserved is = metadata+fat big
+	fseek(drive, firstByte(entry->stCluster+RESERVED), SEEK_SET); 
 	fwrite(nul, 512,1, drive);
 	
 	//write 0000 to all clusters in file

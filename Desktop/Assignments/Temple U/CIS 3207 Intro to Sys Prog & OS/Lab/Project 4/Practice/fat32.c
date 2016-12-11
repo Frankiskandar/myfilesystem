@@ -32,7 +32,8 @@ typedef struct FATentry{
 
 //Each Directory table entry is 32 bytes
 typedef struct dirEntry{
-	char name[11];
+	char name[11]; //name of the file
+	//8 bit file attributes
 	unsigned int rdonly : 1;
 	unsigned int hidden : 1;
 	unsigned int sysfil : 1;
@@ -41,8 +42,8 @@ typedef struct dirEntry{
 	unsigned int archive : 1;
 	unsigned int bit : 1;
 	unsigned int bit1 : 1;
-	char pad[10];
-	short time;
+	char pad[10]; //unused 10 bytes
+	short time; 
 	short date;
 	short stCluster;
 	long fileSize;

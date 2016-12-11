@@ -59,6 +59,7 @@ int findEmptySector();
 void disk_Init();
 void createDirTable();
 void createFATentry(int sector_num, short next);
+//
 int getNextCluster(int sector_num);
 directoryEntry *createDirEntry(char *namep, char attributes, short time, short date, short stCluster, long fileSize);
 directoryEntry *createDirectory(char *path);
@@ -69,7 +70,7 @@ int writeFile(directoryEntry *file, char *write);
 char *readFile(directoryEntry *file);
 int deleteFile(char *path);
 
-//these global var will be our pointers
+//these global var will keep track some important information
 int curDirectory;
 int parentDirectory;
 int curCluster;
@@ -384,11 +385,12 @@ int getNextCluster(int sector_num){
 	return entry->next;
 }
 
+//this function creates directory according to the pathname and returns directory entry struct
 directoryEntry *createDirectory(char *path){
 	int i, j, c;
 	//create array of entries to read
-	directoryEntry *entry = malloc(16*sizeof(directoryEntry));
-	directoryEntry *h = entry;
+	directoryEntry *entry = malloc(16*sizeof(directoryEntry));//a whole sector
+	directoryEntry *h = entry; //
 
 	//create return file descriptor
 	directoryEntry *dir;
@@ -397,13 +399,13 @@ directoryEntry *createDirectory(char *path){
 	char *names[16];
 	char entryName[12];
 	
-	//seperate path using the slash's
+	//use strtok to seperate the pathname every "/"
         names[0] = strtok(path, "/");
 	for(i = 1; names[i-1]!= NULL && i < 16; i++){
 		names[i] = strtok(NULL, "/");
 	}
 	i--;
-	//seek to root directory table
+	//go to first byte of RD entry
 	fseek(disk, firstByte(RD_START_SECTOR), SEEK_SET); //62
 	for(j = 0 ; j < i ; entry++){
 		//read entries until path is totally parsed
@@ -437,10 +439,12 @@ directoryEntry *createDirectory(char *path){
 				return NULL;
 			}	
 		}
+		//if entryname is the same as whats in names[j]
 		else if(strcmp(e, names[j])==0){
 			printf("File or directory already exists with this name\n");
 			return NULL;
 		}
+		//if the current offset is already 512, that directory is full
 		else if(curOffset == 512){
 			printf("No space in current directory table\n");
 			return NULL;
@@ -449,111 +453,121 @@ directoryEntry *createDirectory(char *path){
 			i--;
 		
 	}
-	//Do I need to create . and ..?
-	
-	//get time
+	//get the timestamp for directory entry
 	short *timeDate = getTimeDate();
 	short date = *(timeDate+1);
-	char attributes = 0x08;
+	//set the file attribute
+	char attributes = 0x08; //file attr 08 means its a subdir
 
-	//create diectory entry and FAT entry
+	//create directory entry and FAT entry
 	curCluster = findEmptySector();
+	//for a directory I allocate a whole sector(512) as filesize
+	// just for simplicity and temporary solution
 	dir = createDirEntry(names[j], attributes, *timeDate, date, curCluster, BLOCK_SIZE);
+	// create FF FF entry in fat table because its only 1 sector big
 	createFATentry(curCluster, 0xFFFF);
 	createDirTable();
-
 	free(h);
 
 	return dir;
 }
-
+//this function creates directory entry
+//each dir entry is 32 bytes
+//returns directory entry struct
 directoryEntry *createDirEntry(char *namep, char attributes, short time, short date, short stCluster, long filesize){
 	int i;
 	directoryEntry *entry = malloc(sizeof(directoryEntry));
 	directoryEntry *check = malloc(sizeof(directoryEntry));
-	int numEntries;
+//	int numEntries;
 	//get name and update entry
-	for(i = 0; i <11; i++, namep++){
-		if(*namep!=NULL){
-			//move to extension
+	for(i = 0; i <11; i++, namep++){ //11 bytes for name
+		if(*namep!=NULL)
+		{
+			//we found the start of the extension
 			if(*namep == '.'){
 				namep++;
 				for(;i<8;i++)
-					entry->name[i] = ' ';
+					entry->name[i] = ' '; //add some whitespace before dot to file the whole 8 char
 			}
+			//if name of the file is bigger than 8 (excluding extension)
 			else if(i == 8 && *namep!='.'){
                         	printf("Create file or directory failed, file name too long");
                         	return NULL;
                		}
+            //insert the name to the struct
 			entry->name[i] = *namep;
-		}
-		else{	
+		}//end if
+		else
+		{
+			//name+ext must be 11 char total, I add space to fill it out
 			for(; i < 11; i++)
 				entry->name[i]= ' ';
-		}
-	}
-	
-	//set attributes
-	if(attributes>=128){
+		}//end else
+	} //end for	
+	//set attributes according to the parameter of this function
+	if(attributes>=128)
+	{
 		attributes -=128;
 		entry->rdonly = 1;
 	}
 	else
 		entry->rdonly = 0;
-	if(attributes>=64){
+	if(attributes>=64)
+	{
 		attributes -= 64;
 		entry->hidden = 1;
 	}
 	else
 		entry->hidden = 0;
-	if(attributes>=32){
+	if(attributes>=32)
+	{
 		attributes -= 32;
 		entry->sysfil = 1;
 	}
 	else
 		entry->sysfil = 0;
-	if(attributes>=16){
+	if(attributes>=16)
+	{
 		attributes -= 16;
 		entry->volLabel = 1;
 	}
 	else
 		entry->volLabel = 0;
-	if(attributes>=8){
+	if(attributes>=8)
+	{
 		attributes -= 8;
 		entry->subdir = 1;
 	}
 	else
 		entry->subdir = 0;
-	if(attributes>=4){
+	if(attributes>=4)
+	{
 		attributes -= 4;
 		entry->archive = 1;
 	}
 	else
 		entry->archive = 0;
-	entry->bit = 0;
-	entry->bit1 = 0;
-		
-	for(i = 0; i < 10; i++)
+		entry->bit = 0;
+		entry->bit1 = 0;
+	//set the unused offset to 00
+	for(i = 0; i < 10; i++) 
 		entry->pad[i] = 0x00;
-
-	//set time&date
+	// set the modified time and date
 	entry->time = time;
 	entry->date = date;
-
-	//set starting cluster and filesize
+	// set the start cluster
 	entry->stCluster = stCluster;
+	// set the filesize
 	entry->fileSize = filesize;
-
-	//find empty entry
+	// find an empty 32 byte entry 
+	// it depends heavily where we are right now according to curDirectory
 	fseek(disk, firstByte(curDirectory+NUM_RESERVED_SECTORS), SEEK_SET);
-	fread(check, 32, 1, disk);
-	while(check->stCluster!=0)
-		fread(check, 32, 1, disk);
-	
-	//move back to empty entry and write to disk
+	fread(check, 32, 1, disk); // we use a struct just to check, we dont want insert the data into our already prepared entry
+	while(check->stCluster!=0) //until we find start cluster = 0
+		fread(check, 32, 1, disk);	
+	//go back to the empty entry and write to disk
 	fseek(disk, -32, SEEK_CUR);
-	fwrite(entry, 32, 1, disk);
-	
+	fwrite(entry, 32, 1, disk);	//we are in the right position, now write the entry
 	//seek back to previous position
 	fseek(disk, firstByte((entry->stCluster+NUM_RESERVED_SECTORS)), SEEK_SET);
 	return entry;
@@ -568,14 +582,21 @@ directoryEntry *createFile(char *path){
 	char entryName[12];
 	char *p = path;
 	char *e;
-	while(*p!= 0){p++;}
+	while(*p!= 0)
+	{
+		p++;
+	}//end while
 	*p = '\0';
 	p = path;
-	if(strchr(p, '.')!=NULL){
+	// if there is a char after extension
+	if(strchr(p, '.')!=NULL)
+	{
 		i = 0;
-		while(*p!='.'){
+		while(*p!='.')
+		{
 			p++;
 			i++;
+			// the file inside a folder, reset the i
 			if(*p == '/')
 				i = 0;
 		}
@@ -587,43 +608,49 @@ directoryEntry *createFile(char *path){
 		}
 	}
 	names[0] = strtok(path, "/");
-        //seperate path using the slash's
-        for(i = 1; names[i-1]!= NULL && i < 16; i++){
+        //separate path using the slash
+        for(i = 1; names[i-1]!= NULL && i < 16; i++)
+		{
                 names[i] = strtok(NULL, "/");
-        }
+        } //end for
         i--;
 	
         fseek(disk, firstByte(RD_START_SECTOR), SEEK_SET);
-        for(j = 0 ; j < i ; ){
-                //read entries until path is totally parsed
-                fread(entry, 32, 1, disk);
-                curOffset+=32;
-
-                //change entry->name to comparable, NULL terminated string
-                if(entry->stCluster!= 0 ||entry->stCluster!='\0'){
-                        c = 0;
-                        while(entry->name[c]!= ' '&& c < 12){
-                                entryName[c] = (char)entry->name[c];
-                                c++;
-                        }
-                }
+        for(j = 0 ; j < i ; )
+		{
+            //read entries until path is totally parsed
+            fread(entry, 32, 1, disk);
+            curOffset+=32;
+            //change entry->name to comparable, NULL terminated string
+            if(entry->stCluster!= 0 ||entry->stCluster!='\0')
+			{
+            	c = 0;
+                while(entry->name[c]!= ' '&& c < 12)
+				{
+                    entryName[c] = (char)entry->name[c];
+                    c++;
+                } //end while
+            }//end if
                 entryName[c] = '\0';
                 e  = (char*)&entryName;
                 //find directory to write new file into
-                if(i>j+1){
-                        if(strcmp(e, names[j])==0){
-                                fseek(disk,firstByte(entry->stCluster+NUM_RESERVED_SECTORS),SEEK_SET);
-                                curCluster = entry->stCluster;
-                                curOffset = 0;
-                                parentDirectory = curDirectory;
-                                curDirectory = curCluster;
-                                j++;
+                if(i>j+1)
+				{
+                        if(strcmp(e, names[j])==0)
+						{
+                            fseek(disk,firstByte(entry->stCluster+NUM_RESERVED_SECTORS),SEEK_SET);
+                            curCluster = entry->stCluster;
+                            curOffset = 0;
+                            parentDirectory = curDirectory;
+                            curDirectory = curCluster;
+                            j++;
                         }
-                        else if(entry->stCluster == 0){
-                                printf("path not found\n");
-                                return NULL;
+                        else if(entry->stCluster == 0)
+						{
+                            printf("path not found\n");
+                            return NULL;
                         }
-                }
+                }//end if i>j
 		//if the path name is now the file to create
                 else if(strcmp(e, names[j])==0){
                         printf("File or directory already exists with this name\n");
@@ -639,16 +666,15 @@ directoryEntry *createFile(char *path){
 
 	//get time 
 	short *timeDate = getTimeDate();
-        short date = *(timeDate+1);
+    short date = *(timeDate+1);
 
 	//0 for all attribute
 	char attributes = 0x00;
 
 	curCluster = findEmptySector();
-        fil = createDirEntry(names[j], attributes, *timeDate, date, curCluster, BLOCK_SIZE*2);
-        createFATentry(curCluster, curCluster+1);
+    fil = createDirEntry(names[j], attributes, *timeDate, date, curCluster, BLOCK_SIZE*2);
+    createFATentry(curCluster, curCluster+1);
 	createFATentry(curCluster+1, 0xFFFF);
-
 	free(h);
 	return fil;
 }
@@ -668,15 +694,17 @@ directoryEntry *openFile(char *path){
 	name[0] = strtok(path, "/");
 	names[0] = malloc(12*sizeof(char));
 	strcpy(names[0], name[0]);
-        //seperate path using the slash's
-        for(i = 1; name[i-1]!= NULL && i < 16; i++){
-                name[i] = strtok(NULL, "/");
-		if(name[i]!=0x0){
-			names[i] = malloc(12*sizeof(char));
-			strcpy(names[i], name[i]);
-		}
-        }
-        i--;
+    //use strtok to separate /
+    for(i = 1; name[i-1]!= NULL && i < 16; i++)
+	{
+    	name[i] = strtok(NULL, "/");
+		if(name[i]!=0x0)
+		{
+				names[i] = malloc(12*sizeof(char));
+				strcpy(names[i], name[i]);
+		}//end if
+    }//end for
+    i--;
 	//look for extension and add spaces so it looks like an entry name
 	for(e = names[i-1], j=0; *e!='.'; e++,j++);
 	ex = names[i-1];
@@ -822,33 +850,36 @@ char *readFile(directoryEntry *file){
 	return h;
 
 }
-
+//this function deletes a file, it takes filepath as parameter
+// returns 0 if the deletion is successful
 int deleteFile(char *path){
-	//open file to parse path
+	//use openfile function to parse the path given by parameter
 	directoryEntry *file = openFile(path);
-	//if path does not exist
-	if(file->stCluster == 0) //by checking the start cluster #
+	//if the start cluster is 0, it means the path does not exist
+	if(file->stCluster == 0)
 		return -1;
-	//allocate entry  and nul cluster
+	//allocate entry
 	directoryEntry *entry = malloc(sizeof(directoryEntry));
+	//allocate 512 x 00
 	char *nul = malloc(512*sizeof(char));
+	//set the global var curCluster to be the same as start cluster
 	curCluster = file->stCluster;
-
 	//seek to current directory
+	// we get the current directory value from openfile function
 	fseek(disk, firstByte(curDirectory+NUM_RESERVED_SECTORS), SEEK_SET);
 	//read entry 
 	fread(entry, 32, 1, disk);
 	curOffset = 32;
-	//find the file
-	while(entry->stCluster!=file->stCluster){ //compare the start cluster
+	//find the file by comparing the star cluster
+	while(entry->stCluster!=file->stCluster)
+	{ 
 		fread(entry, 32, 1, disk);
-	}
-	//seek back on entry
-	fseek(disk, -32, SEEK_CUR); // seek to the start
+	}// end while
+	/// seek to the start of the entry
+	fseek(disk, -32, SEEK_CUR);
+	//delete the entry by writing 32 byte worth of 00 00
 	fwrite(nul, 32,1, disk); // write 00 32 times from the start
-
-	//seek to start cluster and write null to it
-	//write 00 in the data region
+	//write all 00 in the data region according to start cluster
 	//reserved is = metadata+fat big
 	fseek(disk, firstByte(entry->stCluster+NUM_RESERVED_SECTORS), SEEK_SET); 
 	fwrite(nul, 512,1, disk);
@@ -856,9 +887,10 @@ int deleteFile(char *path){
 	//write 0000 to all clusters in file
 	while(curCluster!=-1){
 		int i = getNextCluster(curCluster);
-                createFATentry(curCluster, 0x0000);
+		//delete the corresponding fat entry by writing 0000
+        createFATentry(curCluster, 0x0000);
 		curCluster = i;
-		fwrite(nul, 512, 1, disk);
+		fwrite(nul, 512, 1, disk);//might be unecessary
 	}
 	free(nul);
 	return 0;
